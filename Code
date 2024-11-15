@@ -1,0 +1,88 @@
+#include <ESP32_Servo.h>
+#include <BluetoothSerial.h>
+
+Servo myservo1, myservo2, myservo3, myservo4;
+BluetoothSerial SerialBT;
+
+const int NUM_STEPS = 100;
+float sineTable[NUM_STEPS];
+float cosineTable[NUM_STEPS];
+
+const int F = 4; // Reduced amplitude for ankle movement
+const int R = 5; // Reduced amplitude for hip rotation
+const int dt = 15; // Delay between each loop iteration
+
+// Neutral positions for each servo
+const int POSA = 90; // Neutral position for Servo 1 (hip)
+const int POSB = 96; // Neutral position for Servo 2 (ankle)
+const int POSC = 93; // Neutral position for Servo 3 (hip)
+const int POSD = 80; // Neutral position for Servo 4 (ankle)
+
+int currentStep = 0;
+char currentCommand = '\0';
+
+void setup() {
+  myservo1.attach(4, 500, 2500);  // Pin 4, min pulse 500 µs, max pulse 2500 µs
+  myservo2.attach(5, 500, 2500);  // Pin 5
+  myservo3.attach(13, 500, 2500);  // Pin 13
+  myservo4.attach(14, 500, 2500);  // Pin 14
+
+  SerialBT.begin("ESP32_Robot");
+
+  // Precompute sine and cosine values
+  for (int i = 0; i < NUM_STEPS; i++) {
+    float angle = i * 2.0 * PI / NUM_STEPS;
+    sineTable[i] = R * sin(angle); // Scaled hip rotation values
+    cosineTable[i] = F * cos(angle); // Scaled ankle movement values
+  }
+}
+
+// Move the robot one step at a time based on currentStep
+void moveRobotStep(int hipOffset, int ankleOffset, int trnR, int trnL) {
+  float pulse = cosineTable[currentStep] * ankleOffset;
+  float pulse2 = sineTable[currentStep] * hipOffset;
+
+  myservo1.write(POSA + pulse2*trnR);
+  myservo2.write(POSB + pulse*trnR);
+  myservo3.write(POSC + pulse2*trnL);
+  myservo4.write(POSD + pulse*trnL);
+
+  currentStep = (currentStep + 1) % NUM_STEPS;
+  delay(dt);
+}
+
+void loop() {
+  if (SerialBT.available()) {
+    // Read the new command and set it as the current command
+    char newCommand = SerialBT.read();
+    if (newCommand == 'F' || newCommand == 'B' || newCommand == 'L' || newCommand == 'R' || newCommand == 'S') {
+      currentCommand = newCommand;
+      currentStep = 0;  // Reset step when a new command is received
+    }
+  }
+
+  // Execute movement based on currentCommand
+  switch (currentCommand) {
+    case 'B':
+      moveRobotStep(R, F, 1, 1); // B
+      break;
+    case 'F':
+      moveRobotStep(R, -F, 1, 1); // F
+      break;
+    case 'R':
+      moveRobotStep(R, -F, 1, 0.2); 
+      break;
+    case 'L':
+      moveRobotStep(R, -F, 0.2, 1); 
+      break;
+    case 'S':  // Stop command
+      // Maintain neutral positions
+      myservo1.write(POSA);
+      myservo2.write(POSB);
+      myservo3.write(POSC);
+      myservo4.write(POSD);
+      break;
+    default:
+      break;
+  }
+}
